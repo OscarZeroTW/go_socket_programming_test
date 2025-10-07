@@ -51,7 +51,7 @@ func runServer() {
 
 func runClient1() {
 	fmt.Println("啟動UDP Client 1...")
-	cmd := exec.Command("go", "run", "client/client1.go")
+	cmd := exec.Command("go", "run", "client1/client1.go")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Run()
@@ -59,7 +59,7 @@ func runClient1() {
 
 func runClient2() {
 	fmt.Println("啟動UDP Client 2...")
-	cmd := exec.Command("go", "run", "client/client2.go")
+	cmd := exec.Command("go", "run", "client2/client2.go")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Run()
@@ -67,7 +67,7 @@ func runClient2() {
 
 func runProxy1() {
 	fmt.Println("啟動UDP Proxy 1...")
-	cmd := exec.Command("go", "run", "proxy/proxy1.go")
+	cmd := exec.Command("go", "run", "proxy1/proxy1.go")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Run()
@@ -75,7 +75,7 @@ func runProxy1() {
 
 func runProxy2() {
 	fmt.Println("啟動UDP Proxy 2...")
-	cmd := exec.Command("go", "run", "proxy/proxy2.go")
+	cmd := exec.Command("go", "run", "proxy2/proxy2.go")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Run()
@@ -90,7 +90,7 @@ func runAll(quietMode bool) {
 	if !quietMode {
 		fmt.Println("啟動UDP Client 1...")
 	}
-	client1Cmd := exec.Command("go", "run", "client/client1.go")
+	client1Cmd := exec.Command("go", "run", "client1/client1.go")
 	if quietMode {
 		client1Cmd.Stdout = os.Stdout
 		client1Cmd.Stderr = os.Stderr
@@ -104,7 +104,7 @@ func runAll(quietMode bool) {
 	if !quietMode {
 		fmt.Println("啟動UDP Client 2...")
 	}
-	client2Cmd := exec.Command("go", "run", "client/client2.go")
+	client2Cmd := exec.Command("go", "run", "client1/client2.go")
 	if quietMode {
 		client2Cmd.Stdout = os.Stdout
 		client2Cmd.Stderr = os.Stderr
@@ -121,7 +121,7 @@ func runAll(quietMode bool) {
 	if !quietMode {
 		fmt.Println("啟動UDP Proxy 1...")
 	}
-	proxy1Args := []string{"run", "proxy/proxy1.go"}
+	proxy1Args := []string{"run", "proxy1/proxy1.go"}
 	if quietMode {
 		proxy1Args = append(proxy1Args, "-q")
 	}
@@ -139,7 +139,7 @@ func runAll(quietMode bool) {
 	if !quietMode {
 		fmt.Println("啟動UDP Proxy 2...")
 	}
-	proxy2Args := []string{"run", "proxy/proxy2.go"}
+	proxy2Args := []string{"run", "proxy2/proxy2.go"}
 	if quietMode {
 		proxy2Args = append(proxy2Args, "-q")
 	}
