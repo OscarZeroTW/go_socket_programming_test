@@ -1,0 +1,15 @@
+// build your config.yaml based on this example
+proxy:
+  udp_proxy1_ip: "your_proxy_ip"  # e.g., "192.168.88.250"
+  udp_proxy2_ip: "your_proxy_ip"  # e.g., "192.168.88.250"
+  udp_proxy1_listen_port: "port1" # e.g., "5406"
+  udp_proxy2_listen_port: "port2" # e.g., "5408"
+
+server:
+  server_ip: "your_server_ip" # e.g., "192.168.88.251"
+  server_listen_port: "port"  # e.g., "5400"
+
+client:
+  client_ip: "your_client_ip" # e.g., "192.168.88.252"
+  client1_listen_port: "your_client_listen_port" # e.g., "5405"
+  client2_listen_port: "your_client_listen_port" # e.g., "5407"
