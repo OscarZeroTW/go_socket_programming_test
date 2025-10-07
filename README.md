@@ -6,11 +6,12 @@
 
 測試所有功能
 ```
-go run test.go all
+chmod +x test.sh
+./test.sh
 ```
 僅輸出client結果
 ```
-go run test.go all -q
+./test.sh all -q
 ```
 
 ## 實際部署測試
