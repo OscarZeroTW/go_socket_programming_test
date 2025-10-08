@@ -1,4 +1,4 @@
-// build your config.yaml based on this example
+# build your config.yaml based on this example
 proxy:
   udp_proxy1_ip: "your_proxy_ip"  # e.g., "192.168.88.250"
   udp_proxy2_ip: "your_proxy_ip"  # e.g., "192.168.88.250"
