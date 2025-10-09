@@ -41,7 +41,7 @@ func main() {
 		fmt.Printf("target Client 2 address: %s\n", clientAddr)
 	}
 
-	// 建立到Client 2的連接
+	// resolve Client 2 address
 	clientUDPAddr, err := net.ResolveUDPAddr("udp", clientAddr)
 	if err != nil {
 		fmt.Printf("resolve Client 2 UDP address failed: %v\n", err)

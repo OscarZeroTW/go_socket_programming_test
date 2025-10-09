@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 	"net"
-	"time"
 	"os"
+	"time"
 
 	"go-network-mini-project/config"
 )
@@ -57,7 +57,7 @@ func main() {
 		// add timestamp (RFC3339Nano format) to packet content
 		timestamp := time.Now().Format(time.RFC3339Nano)
 		message := fmt.Sprintf("Packet %d|%s", i, timestamp)
-		
+
 		// send to Proxy 1
 		_, err := conn1.Write([]byte(message))
 		if err != nil {
@@ -78,8 +78,8 @@ func main() {
 			fmt.Printf("sent: Packet %d to Proxy 2\n", i)
 		}
 
-		// wait 100ms
-		time.Sleep(100 * time.Millisecond)
+		// wait 10ms
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	if !quietMode {

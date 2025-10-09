@@ -37,7 +37,7 @@ func main() {
 	fmt.Printf("UDP Client 2 started, listening on: %s\n", clientAddr)
 	fmt.Println("waiting for packets (normal listening)...")
 
-	// 接收packets
+	// receive packets (normal listening)
 	buffer := make([]byte, 1024)
 	packetCount := 0
 
