@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"os"
@@ -23,58 +24,68 @@ func main() {
 	clientConfig := cfg.GetClientConfig()
 	quietMode := len(os.Args) > 1 && os.Args[1] == "-q"
 
-	// create UDP listener (receive packets from Server)
+	// create TCP listener (receive packets from Server)
 	proxy2Addr := proxyConfig.UDPProxy2IP + ":" + proxyConfig.UDPProxy2ListenPort
-	addr, err := net.ResolveUDPAddr("udp", proxy2Addr)
+	listener, err := net.Listen("tcp", proxy2Addr)
 	if err != nil {
-		fmt.Printf("resolve UDP address failed: %v\n", err)
+		fmt.Printf("create TCP listener failed: %v\n", err)
 		return
 	}
-
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		fmt.Printf("create UDP listener failed: %v\n", err)
-		return
-	}
-	defer conn.Close()
+	defer listener.Close()
 
 	clientAddr := clientConfig.ClientIP + ":" + clientConfig.Client2ListenPort
 	if !quietMode {
-		fmt.Printf("UDP Proxy 2 started, listening on: %s\n", proxy2Addr)
+		fmt.Printf("TCP Proxy 2 started, listening on: %s\n", proxy2Addr)
 		fmt.Printf("target Client 2 address: %s\n", clientAddr)
+		fmt.Println("Proxy 2 started listening and forwarding (5% async delay 20ms simulation)...")
 	}
 
-	// resolve Client 2 address
-	clientUDPAddr, err := net.ResolveUDPAddr("udp", clientAddr)
+	for {
+		// accept connection from Server
+		conn, err := listener.Accept()
+		if err != nil {
+			fmt.Printf("accept connection failed: %v\n", err)
+			continue
+		}
+
+		// handle connection in goroutine
+		go handleConnection(conn, clientAddr, quietMode)
+	}
+}
+
+func handleConnection(serverConn net.Conn, clientAddr string, quietMode bool) {
+	defer serverConn.Close()
+
+	// connect to Client 2
+	clientConn, err := net.Dial("tcp", clientAddr)
 	if err != nil {
-		fmt.Printf("resolve Client 2 UDP address failed: %v\n", err)
+		if !quietMode {
+			fmt.Printf("connect to Client 2 failed: %v\n", err)
+		}
 		return
 	}
+	defer clientConn.Close()
 
-	// receive and forward packets (with 5% delay simulation)
 	buffer := make([]byte, 1024)
 	packetCount := 0
 	delayedCount := 0
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	var wg sync.WaitGroup
 
-	if !quietMode {
-		fmt.Println("Proxy 2 started listening and forwarding (5% async delay 20ms simulation)...")
-	}
-
 	for {
-		n, err := conn.Read(buffer)
+		n, err := serverConn.Read(buffer)
 		if err != nil {
-			fmt.Printf("read UDP data failed: %v\n", err)
-			continue
+			if err != io.EOF {
+				fmt.Printf("read TCP data failed: %v\n", err)
+			}
+			break
 		}
 
 		packetCount++
 		message := string(buffer[:n])
 
 		if !quietMode {
-			fmt.Printf("Proxy 2 received: %s (packet #%d)\n",
-				message, packetCount)
+			fmt.Printf("Proxy 2 received: %s (packet #%d)\n", message, packetCount)
 		}
 
 		// Copy data to avoid buffer reuse issues
@@ -93,7 +104,7 @@ func main() {
 			go func(data []byte, pktNum int) {
 				defer wg.Done()
 				time.Sleep(20 * time.Millisecond)
-				_, err := conn.WriteToUDP(data, clientUDPAddr)
+				_, err := clientConn.Write(data)
 				if err != nil {
 					if !quietMode {
 						fmt.Printf("delayed packet %d to Client 2 failed: %v\n", pktNum, err)
@@ -104,14 +115,18 @@ func main() {
 			}(data, packetCount)
 		} else {
 			// forward to Client 2
-			_, err = conn.WriteToUDP(data, clientUDPAddr)
+			_, err = clientConn.Write(data)
 			if err != nil {
 				if !quietMode {
 					fmt.Printf("forward packet %d to Client 2 failed: %v\n", packetCount, err)
 				}
+				break
 			} else if !quietMode {
 				fmt.Printf("Proxy 2 forwarded packet %d to Client 2 (immediate)\n", packetCount)
 			}
 		}
 	}
+
+	// Wait for all delayed packets to be sent
+	wg.Wait()
 }

@@ -20,36 +20,26 @@ func main() {
 	proxyConfig := cfg.GetProxyConfig()
 	quietMode := len(os.Args) > 1 && os.Args[1] == "-q"
 
-	// create UDP connection to Proxy 1
+	// create TCP connection to Proxy 1
 	proxy1Addr := proxyConfig.UDPProxy1IP + ":" + proxyConfig.UDPProxy1ListenPort
-	proxy1UDPAddr, err := net.ResolveUDPAddr("udp", proxy1Addr)
+	conn1, err := net.Dial("tcp", proxy1Addr)
 	if err != nil {
-		fmt.Printf("resolve Proxy 1 UDP address failed: %v\n", err)
-		return
-	}
-	conn1, err := net.DialUDP("udp", nil, proxy1UDPAddr)
-	if err != nil {
-		fmt.Printf("create UDP connection to Proxy 1 failed: %v\n", err)
+		fmt.Printf("create TCP connection to Proxy 1 failed: %v\n", err)
 		return
 	}
 	defer conn1.Close()
 
-	// create UDP connection to Proxy 2
+	// create TCP connection to Proxy 2
 	proxy2Addr := proxyConfig.UDPProxy2IP + ":" + proxyConfig.UDPProxy2ListenPort
-	proxy2UDPAddr, err := net.ResolveUDPAddr("udp", proxy2Addr)
+	conn2, err := net.Dial("tcp", proxy2Addr)
 	if err != nil {
-		fmt.Printf("resolve Proxy 2 UDP address failed: %v\n", err)
-		return
-	}
-	conn2, err := net.DialUDP("udp", nil, proxy2UDPAddr)
-	if err != nil {
-		fmt.Printf("create UDP connection to Proxy 2 failed: %v\n", err)
+		fmt.Printf("create TCP connection to Proxy 2 failed: %v\n", err)
 		return
 	}
 	defer conn2.Close()
 
 	if !quietMode {
-		fmt.Printf("UDP Server started, sending to Proxy 1: %s and Proxy 2: %s\n", proxy1Addr, proxy2Addr)
+		fmt.Printf("TCP Server started, sending to Proxy 1: %s and Proxy 2: %s\n", proxy1Addr, proxy2Addr)
 	}
 
 	// send 100 packets, every 100ms

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"os"
@@ -22,57 +23,68 @@ func main() {
 	clientConfig := cfg.GetClientConfig()
 	quietMode := len(os.Args) > 1 && os.Args[1] == "-q"
 
-	// create UDP listener (receive packets from Server)
+	// create TCP listener (receive packets from Server)
 	proxy1Addr := proxyConfig.UDPProxy1IP + ":" + proxyConfig.UDPProxy1ListenPort
-	addr, err := net.ResolveUDPAddr("udp", proxy1Addr)
+	listener, err := net.Listen("tcp", proxy1Addr)
 	if err != nil {
-		fmt.Printf("resolve UDP address failed: %v\n", err)
+		fmt.Printf("create TCP listener failed: %v\n", err)
 		return
 	}
-
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		fmt.Printf("create UDP listener failed: %v\n", err)
-		return
-	}
-	defer conn.Close()
+	defer listener.Close()
 
 	clientAddr := clientConfig.ClientIP + ":" + clientConfig.Client1ListenPort
 	if !quietMode {
-		fmt.Printf("UDP Proxy 1 started, listening on: %s\n", proxy1Addr)
+		fmt.Printf("TCP Proxy 1 started, listening on: %s\n", proxy1Addr)
 		fmt.Printf("target Client 1 address: %s\n", clientAddr)
-	}
-
-	// resolve Client 2 address
-	clientUDPAddr, err := net.ResolveUDPAddr("udp", clientAddr)
-	if err != nil {
-		fmt.Printf("resolve Client 1 UDP address failed: %v\n", err)
-		return
-	}
-
-	// receive and forward packets (with 10% packet loss simulation)
-	buffer := make([]byte, 1024)
-	packetCount := 0
-	droppedCount := 0
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	if !quietMode {
 		fmt.Println("Proxy 1 started listening and forwarding (10% packet loss simulation)...")
 	}
 
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+
 	for {
-		n, err := conn.Read(buffer)
+		// accept connection from Server
+		conn, err := listener.Accept()
 		if err != nil {
-			fmt.Printf("read UDP data failed: %v\n", err)
+			fmt.Printf("accept connection failed: %v\n", err)
 			continue
+		}
+
+		// handle connection in goroutine
+		go handleConnection(conn, clientAddr, quietMode, rng)
+	}
+}
+
+func handleConnection(serverConn net.Conn, clientAddr string, quietMode bool, rng *rand.Rand) {
+	defer serverConn.Close()
+
+	// connect to Client 1
+	clientConn, err := net.Dial("tcp", clientAddr)
+	if err != nil {
+		if !quietMode {
+			fmt.Printf("connect to Client 1 failed: %v\n", err)
+		}
+		return
+	}
+	defer clientConn.Close()
+
+	buffer := make([]byte, 1024)
+	packetCount := 0
+	droppedCount := 0
+
+	for {
+		n, err := serverConn.Read(buffer)
+		if err != nil {
+			if err != io.EOF {
+				fmt.Printf("read TCP data failed: %v\n", err)
+			}
+			break
 		}
 
 		packetCount++
 		message := string(buffer[:n])
 
 		if !quietMode {
-			fmt.Printf("Proxy 1 received: %s (packet #%d)\n",
-				message, packetCount)
+			fmt.Printf("Proxy 1 received: %s (packet #%d)\n", message, packetCount)
 		}
 
 		// 10% packet loss simulation
@@ -86,11 +98,12 @@ func main() {
 		}
 
 		// forward to Client 1
-		_, err = conn.WriteToUDP(buffer[:n], clientUDPAddr)
+		_, err = clientConn.Write(buffer[:n])
 		if err != nil {
 			if !quietMode {
 				fmt.Printf("forward packet %d to Client 1 failed: %v\n", packetCount, err)
 			}
+			break
 		} else if !quietMode {
 			fmt.Printf("Proxy 1 forwarded packet %d to Client 1\n", packetCount)
 		}
