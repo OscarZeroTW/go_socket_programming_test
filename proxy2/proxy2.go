@@ -103,7 +103,7 @@ func main() {
 				}
 			}(data, packetCount)
 		} else {
-			// 立即轉發到Client 2
+			// forward to Client 2
 			_, err = conn.WriteToUDP(data, clientUDPAddr)
 			if err != nil {
 				if !quietMode {
