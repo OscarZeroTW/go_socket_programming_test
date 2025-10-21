@@ -2,8 +2,11 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
+	"sync"
+	"time"
 
 	"go-network-mini-project/config"
 )
@@ -48,12 +51,15 @@ func main() {
 		return
 	}
 
-	// receive and forward packets (normal listening)
+	// receive and forward packets (with 5% delay simulation)
 	buffer := make([]byte, 1024)
 	packetCount := 0
+	delayedCount := 0
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	var wg sync.WaitGroup
 
 	if !quietMode {
-		fmt.Println("Proxy 2 started normal listening and forwarding...")
+		fmt.Println("Proxy 2 started listening and forwarding (5% async delay 20ms simulation)...")
 	}
 
 	for {
@@ -65,20 +71,47 @@ func main() {
 
 		packetCount++
 		message := string(buffer[:n])
-		
+
 		if !quietMode {
-			fmt.Printf("Proxy 2 received: %s (%d packet)\n", 
+			fmt.Printf("Proxy 2 received: %s (packet #%d)\n",
 				message, packetCount)
 		}
 
-		// 轉發到Client 2
-		_, err = conn.WriteToUDP(buffer[:n], clientUDPAddr)
-		if err != nil {
+		// Copy data to avoid buffer reuse issues
+		data := make([]byte, n)
+		copy(data, buffer[:n])
+
+		// 5% delay simulation (20ms) - non-blocking
+		if rng.Float64() < 0.05 {
+			delayedCount++
 			if !quietMode {
-				fmt.Printf("forward packet %d to Client 2 failed: %v\n", packetCount, err)
+				fmt.Printf("Proxy 2 will DELAY packet #%d by 20ms (5%% delay simulation) - Total delayed: %d\n",
+					packetCount, delayedCount)
 			}
-		} else if !quietMode {
-			fmt.Printf("Proxy 2 forwarded packet %d to Client 2\n", packetCount)
+			// Use goroutine to delay and send packet asynchronously
+			wg.Add(1)
+			go func(data []byte, pktNum int) {
+				defer wg.Done()
+				time.Sleep(20 * time.Millisecond)
+				_, err := conn.WriteToUDP(data, clientUDPAddr)
+				if err != nil {
+					if !quietMode {
+						fmt.Printf("delayed packet %d to Client 2 failed: %v\n", pktNum, err)
+					}
+				} else if !quietMode {
+					fmt.Printf("Proxy 2 forwarded DELAYED packet %d to Client 2 (after 20ms)\n", pktNum)
+				}
+			}(data, packetCount)
+		} else {
+			// 立即轉發到Client 2
+			_, err = conn.WriteToUDP(data, clientUDPAddr)
+			if err != nil {
+				if !quietMode {
+					fmt.Printf("forward packet %d to Client 2 failed: %v\n", packetCount, err)
+				}
+			} else if !quietMode {
+				fmt.Printf("Proxy 2 forwarded packet %d to Client 2 (immediate)\n", packetCount)
+			}
 		}
 	}
 }

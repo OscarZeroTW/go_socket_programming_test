@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
+	"time"
 
 	"go-network-mini-project/config"
 )
@@ -48,12 +50,14 @@ func main() {
 		return
 	}
 
-	// receive and forward packets (normal listening)
+	// receive and forward packets (with 10% packet loss simulation)
 	buffer := make([]byte, 1024)
 	packetCount := 0
+	droppedCount := 0
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	if !quietMode {
-		fmt.Println("Proxy 1 started normal listening and forwarding...")
+		fmt.Println("Proxy 1 started listening and forwarding (10% packet loss simulation)...")
 	}
 
 	for {
@@ -65,10 +69,20 @@ func main() {
 
 		packetCount++
 		message := string(buffer[:n])
-		
+
 		if !quietMode {
-			fmt.Printf("Proxy 1 received: %s (%d packet)\n", 
+			fmt.Printf("Proxy 1 received: %s (packet #%d)\n",
 				message, packetCount)
+		}
+
+		// 10% packet loss simulation
+		if rng.Float64() < 0.10 {
+			droppedCount++
+			if !quietMode {
+				fmt.Printf("Proxy 1 DROPPED packet #%d (10%% loss simulation) - Total dropped: %d\n",
+					packetCount, droppedCount)
+			}
+			continue
 		}
 
 		// forward to Client 1
