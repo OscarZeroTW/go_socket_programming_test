@@ -48,6 +48,9 @@ func main() {
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
 
+	// Get remote address
+	remoteAddr := conn.RemoteAddr().String()
+
 	// receive packets (normal listening)
 	buffer := make([]byte, 1024)
 	packetCount := 0
@@ -75,22 +78,22 @@ func handleConnection(conn net.Conn) {
 			sendTime, err := time.Parse(time.RFC3339Nano, timestampStr)
 			if err != nil {
 				fmt.Printf("[Client 1] parse timestamp failed: %v\n", err)
-				fmt.Printf("[Client 1] received: %s (%d packet)\n",
-					packetInfo, packetCount)
+				fmt.Printf("[Client 1] received from %s: %s (%d packet)\n",
+					remoteAddr, packetInfo, packetCount)
 				fmt.Printf("  Receive Time: %s\n", receiveTime.Format(time.RFC3339Nano))
 			} else {
 				// calculate latency
 				latency := receiveTime.Sub(sendTime)
-				fmt.Printf("[Client 1] received: %s (%d packet)\n",
-					packetInfo, packetCount)
+				fmt.Printf("[Client 1] received from %s: %s (%d packet)\n",
+					remoteAddr, packetInfo, packetCount)
 				fmt.Printf("  Transmit Time: %s\n", sendTime.Format(time.RFC3339Nano))
 				fmt.Printf("  Receive Time: %s\n", receiveTime.Format(time.RFC3339Nano))
 				fmt.Printf("  Latency: %v\n", latency.Round(time.Microsecond))
 			}
 		} else {
 			// old format or format error
-			fmt.Printf("[Client 1] received: %s (%d packet)\n",
-				message, packetCount)
+			fmt.Printf("[Client 1] received from %s: %s (%d packet)\n",
+				remoteAddr, message, packetCount)
 			fmt.Printf("  Receive Time: %s\n", receiveTime.Format(time.RFC3339Nano))
 		}
 	}
