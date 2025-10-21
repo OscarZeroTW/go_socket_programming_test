@@ -49,30 +49,36 @@ func main() {
 		}
 
 		packetCount++
+		receiveTime := time.Now() // Record receive time
 		message := string(buffer[:n])
-		
+
 		// parse packet: format is "Packet <number>|<timestamp>"
 		parts := strings.SplitN(message, "|", 2)
 		if len(parts) == 2 {
 			packetInfo := parts[0]
 			timestampStr := parts[1]
-			
+
 			// parse timestamp
 			sendTime, err := time.Parse(time.RFC3339Nano, timestampStr)
 			if err != nil {
 				fmt.Printf("[Client 2] parse timestamp failed: %v\n", err)
-				fmt.Printf("[Client 2] received from %s: %s (%d packet)\n", 
+				fmt.Printf("[Client 2] received from %s: %s (%d packet)\n",
 					senderAddr, packetInfo, packetCount)
+				fmt.Printf("  Receive Time: %s\n", receiveTime.Format(time.RFC3339Nano))
 			} else {
 				// calculate latency
-				latency := time.Since(sendTime)
-				fmt.Printf("[Client 2] received from %s: %s (%d packet, latency: %v)\n", 
-					senderAddr, packetInfo, packetCount, latency.Round(time.Microsecond))
+				latency := receiveTime.Sub(sendTime)
+				fmt.Printf("[Client 2] received from %s: %s (%d packet)\n",
+					senderAddr, packetInfo, packetCount)
+				fmt.Printf("  Transmit Time: %s\n", sendTime.Format(time.RFC3339Nano))
+				fmt.Printf("  Receive Time: %s\n", receiveTime.Format(time.RFC3339Nano))
+				fmt.Printf("  Latency: %v\n", latency.Round(time.Microsecond))
 			}
 		} else {
 			// old format or format error
-			fmt.Printf("[Client 2] received from %s: %s (%d packet)\n", 
+			fmt.Printf("[Client 2] received from %s: %s (%d packet)\n",
 				senderAddr, message, packetCount)
+			fmt.Printf("  Receive Time: %s\n", receiveTime.Format(time.RFC3339Nano))
 		}
 	}
 }
