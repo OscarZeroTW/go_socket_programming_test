@@ -5,9 +5,16 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"go-network-mini-project/config"
+)
+
+var (
+	serverAddr    *net.UDPAddr
+	serverAddrMux sync.RWMutex
 )
 
 func main() {
@@ -43,7 +50,7 @@ func main() {
 		fmt.Printf("target Client 1 address: %s\n", clientAddr)
 	}
 
-	// resolve Client 2 address
+	// resolve Client 1 address
 	clientUDPAddr, err := net.ResolveUDPAddr("udp", clientAddr)
 	if err != nil {
 		fmt.Printf("resolve Client 1 UDP address failed: %v\n", err)
@@ -61,38 +68,64 @@ func main() {
 	}
 
 	for {
-		n, err := conn.Read(buffer)
+		n, senderAddr, err := conn.ReadFromUDP(buffer)
 		if err != nil {
 			fmt.Printf("read UDP data failed: %v\n", err)
 			continue
 		}
 
-		packetCount++
 		message := string(buffer[:n])
 
-		if !quietMode {
-			fmt.Printf("Proxy 1 received: %s (packet #%d)\n",
-				message, packetCount)
-		}
+		// Check if message is from Server or Client
+		isFromClient := senderAddr.String() == clientUDPAddr.String()
 
-		// 10% packet loss simulation
-		if rng.Float64() < 0.10 {
-			droppedCount++
-			if !quietMode {
-				fmt.Printf("Proxy 1 DROPPED packet #%d (10%% loss simulation) - Total dropped: %d\n",
-					packetCount, droppedCount)
-			}
-			continue
-		}
+		if isFromClient {
+			// Message from Client (NACK or FIN) - forward to Server
+			serverAddrMux.RLock()
+			currentServerAddr := serverAddr
+			serverAddrMux.RUnlock()
 
-		// forward to Client 1
-		_, err = conn.WriteToUDP(buffer[:n], clientUDPAddr)
-		if err != nil {
-			if !quietMode {
-				fmt.Printf("forward packet %d to Client 1 failed: %v\n", packetCount, err)
+			if currentServerAddr != nil {
+				if strings.HasPrefix(message, "NACK:") || strings.TrimSpace(message) == "FIN" {
+					_, err = conn.WriteToUDP(buffer[:n], currentServerAddr)
+					if err != nil && !quietMode {
+						fmt.Printf("[Proxy1] forward %s to Server failed: %v\n", message, err)
+					} else if !quietMode {
+						fmt.Printf("[Proxy1] forwarded %s from Client to Server\n", message)
+					}
+				}
 			}
-		} else if !quietMode {
-			fmt.Printf("Proxy 1 forwarded packet %d to Client 1\n", packetCount)
+		} else {
+			// Message from Server - store server address and forward to Client
+			serverAddrMux.Lock()
+			serverAddr = senderAddr
+			serverAddrMux.Unlock()
+
+			packetCount++
+
+			if !quietMode {
+				fmt.Printf("Proxy 1 received: %s from Server (packet #%d)\n", message, packetCount)
+			}
+
+			// 10% packet loss simulation (only for data packets, not retransmissions)
+			if rng.Float64() < 0.10 && !strings.HasPrefix(message, "NACK:") {
+				droppedCount++
+				if !quietMode {
+					fmt.Printf("Proxy 1 DROPPED packet #%d (10%% loss simulation) - Total dropped: %d\n",
+						packetCount, droppedCount)
+				}
+				continue
+			}
+
+			// forward to Client 1
+			_, err = conn.WriteToUDP(buffer[:n], clientUDPAddr)
+			if err != nil {
+				if !quietMode {
+					fmt.Printf("forward packet %d to Client 1 failed: %v\n", packetCount, err)
+				}
+			} else if !quietMode {
+				fmt.Printf("Proxy 1 forwarded packet %d to Client 1\n", packetCount)
+			}
 		}
 	}
 }
