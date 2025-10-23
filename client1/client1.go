@@ -4,10 +4,115 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"go-network-mini-project/config"
 )
+
+type ReorderBuffer struct {
+	mu             sync.Mutex
+	buffer         map[int]PacketData
+	expectedSeqNum int
+	receivedCount  int
+	processedCount int
+	lostPackets    map[int]bool
+	nackSent       map[int]bool
+}
+
+type PacketData struct {
+	seqNum    int
+	message   string
+	timestamp time.Time
+	recvTime  time.Time
+}
+
+func NewReorderBuffer() *ReorderBuffer {
+	return &ReorderBuffer{
+		buffer:         make(map[int]PacketData),
+		expectedSeqNum: 1,
+		lostPackets:    make(map[int]bool),
+		nackSent:       make(map[int]bool),
+	}
+}
+
+func (rb *ReorderBuffer) processPacket(seqNum int, message string, timestamp time.Time, recvTime time.Time, conn *net.UDPConn, senderAddr *net.UDPAddr) {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+
+	rb.receivedCount++
+
+	if seqNum == rb.expectedSeqNum {
+		// received expected packet, process it
+		rb.processAndPrint(seqNum, message, timestamp, recvTime)
+		rb.expectedSeqNum++
+		rb.processedCount++
+
+		// try to process buffered packets
+		for {
+			if pkt, exists := rb.buffer[rb.expectedSeqNum]; exists {
+				rb.processAndPrint(pkt.seqNum, pkt.message, pkt.timestamp, pkt.recvTime)
+				delete(rb.buffer, rb.expectedSeqNum)
+				rb.expectedSeqNum++
+				rb.processedCount++
+			} else {
+				break
+			}
+		}
+	} else if seqNum > rb.expectedSeqNum {
+		// received out-of-order packet, buffer it
+		rb.buffer[seqNum] = PacketData{
+			seqNum:    seqNum,
+			message:   message,
+			timestamp: timestamp,
+			recvTime:  recvTime,
+		}
+		fmt.Printf("[Client 1] Out-of-order: received SEQ %d, expected %d (buffered)\n", seqNum, rb.expectedSeqNum)
+
+		// send NACK for missing packets
+		for i := rb.expectedSeqNum; i < seqNum; i++ {
+			if !rb.nackSent[i] {
+				rb.sendNACK(i, conn, senderAddr)
+				rb.nackSent[i] = true
+				rb.lostPackets[i] = true
+			}
+		}
+	} else {
+		// received duplicate or old packet
+		fmt.Printf("[Client 1] Duplicate/Old packet: received SEQ %d, expected %d (ignored)\n", seqNum, rb.expectedSeqNum)
+	}
+}
+
+func (rb *ReorderBuffer) processAndPrint(seqNum int, message string, timestamp time.Time, recvTime time.Time) {
+	latency := recvTime.Sub(timestamp)
+	if seqNum%1000 == 0 || seqNum <= 10 {
+		fmt.Printf("[Client 1] Processed SEQ %d\n", seqNum)
+		fmt.Printf("  Transmit Time: %s\n", timestamp.Format(time.RFC3339Nano))
+		fmt.Printf("  Receive Time: %s\n", recvTime.Format(time.RFC3339Nano))
+		fmt.Printf("  Latency: %v\n", latency.Round(time.Microsecond))
+	}
+}
+
+func (rb *ReorderBuffer) sendNACK(seqNum int, conn *net.UDPConn, senderAddr *net.UDPAddr) {
+	nackMsg := fmt.Sprintf("NACK:%d", seqNum)
+	_, err := conn.WriteToUDP([]byte(nackMsg), senderAddr)
+	if err != nil {
+		fmt.Printf("[Client 1] send NACK for SEQ %d failed: %v\n", seqNum, err)
+	} else {
+		fmt.Printf("[Client 1] sent NACK for missing SEQ %d\n", seqNum)
+	}
+}
+
+func (rb *ReorderBuffer) printStats() {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	fmt.Printf("\n[Client 1] === Statistics ===\n")
+	fmt.Printf("  Total Received: %d\n", rb.receivedCount)
+	fmt.Printf("  Total Processed: %d\n", rb.processedCount)
+	fmt.Printf("  Buffered Packets: %d\n", len(rb.buffer))
+	fmt.Printf("  Lost Packets Detected: %d\n", len(rb.lostPackets))
+	fmt.Printf("  Expected Next: %d\n", rb.expectedSeqNum)
+}
 
 func main() {
 	// load config
@@ -35,11 +140,21 @@ func main() {
 	defer conn.Close()
 
 	fmt.Printf("UDP Client 1 started, listening on: %s\n", clientAddr)
-	fmt.Println("waiting for packets (normal listening)...")
+	fmt.Println("waiting for packets with reordering and loss recovery...")
 
-	// receive packets (normal listening)
+	reorderBuf := NewReorderBuffer()
 	buffer := make([]byte, 1024)
-	packetCount := 0
+
+	// periodically print stats
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			reorderBuf.printStats()
+		}
+	}()
+
+	var lastSenderAddr *net.UDPAddr
 
 	for {
 		n, senderAddr, err := conn.ReadFromUDP(buffer)
@@ -48,37 +163,30 @@ func main() {
 			continue
 		}
 
-		packetCount++
-		receiveTime := time.Now() // Record receive time
+		lastSenderAddr = senderAddr
+		recvTime := time.Now()
 		message := string(buffer[:n])
 
-		// parse packet: format is "Packet <number>|<timestamp>"
+		// parse packet: format is "SEQ:<number>|<timestamp>"
 		parts := strings.SplitN(message, "|", 2)
-		if len(parts) == 2 {
-			packetInfo := parts[0]
-			timestampStr := parts[1]
+		if len(parts) == 2 && strings.HasPrefix(parts[0], "SEQ:") {
+			var seqNum int
+			_, err := fmt.Sscanf(parts[0], "SEQ:%d", &seqNum)
+			if err != nil {
+				fmt.Printf("[Client 1] parse sequence number failed: %v\n", err)
+				continue
+			}
 
-			// parse timestamp
+			timestampStr := parts[1]
 			sendTime, err := time.Parse(time.RFC3339Nano, timestampStr)
 			if err != nil {
 				fmt.Printf("[Client 1] parse timestamp failed: %v\n", err)
-				fmt.Printf("[Client 1] received from %s: %s (%d packet)\n",
-					senderAddr, packetInfo, packetCount)
-				fmt.Printf("  Receive Time: %s\n", receiveTime.Format(time.RFC3339Nano))
-			} else {
-				// calculate latency
-				latency := receiveTime.Sub(sendTime)
-				fmt.Printf("[Client 1] received from %s: %s (%d packet)\n",
-					senderAddr, packetInfo, packetCount)
-				fmt.Printf("  Transmit Time: %s\n", sendTime.Format(time.RFC3339Nano))
-				fmt.Printf("  Receive Time: %s\n", receiveTime.Format(time.RFC3339Nano))
-				fmt.Printf("  Latency: %v\n", latency.Round(time.Microsecond))
+				continue
 			}
+
+			reorderBuf.processPacket(seqNum, message, sendTime, recvTime, conn, lastSenderAddr)
 		} else {
-			// old format or format error
-			fmt.Printf("[Client 1] received from %s: %s (%d packet)\n",
-				senderAddr, message, packetCount)
-			fmt.Printf("  Receive Time: %s\n", receiveTime.Format(time.RFC3339Nano))
+			fmt.Printf("[Client 1] unknown packet format: %s\n", message)
 		}
 	}
 }
