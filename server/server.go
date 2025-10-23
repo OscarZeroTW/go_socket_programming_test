@@ -42,43 +42,45 @@ func main() {
 	proxyConfig := cfg.GetProxyConfig()
 	quietMode := len(os.Args) > 1 && os.Args[1] == "-q"
 
-	// create UDP connection to Proxy 1
+	// create UDP listener (not dial, so we can use WriteToUDP)
+	serverAddr := "0.0.0.0:0" // bind to any available port
+	addr, err := net.ResolveUDPAddr("udp", serverAddr)
+	if err != nil {
+		fmt.Printf("resolve server UDP address failed: %v\n", err)
+		return
+	}
+
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		fmt.Printf("create UDP listener failed: %v\n", err)
+		return
+	}
+	defer conn.Close()
+
+	// resolve Proxy addresses
 	proxy1Addr := proxyConfig.UDPProxy1IP + ":" + proxyConfig.UDPProxy1ListenPort
 	proxy1UDPAddr, err := net.ResolveUDPAddr("udp", proxy1Addr)
 	if err != nil {
 		fmt.Printf("resolve Proxy 1 UDP address failed: %v\n", err)
 		return
 	}
-	conn1, err := net.DialUDP("udp", nil, proxy1UDPAddr)
-	if err != nil {
-		fmt.Printf("create UDP connection to Proxy 1 failed: %v\n", err)
-		return
-	}
-	defer conn1.Close()
 
-	// create UDP connection to Proxy 2
 	proxy2Addr := proxyConfig.UDPProxy2IP + ":" + proxyConfig.UDPProxy2ListenPort
 	proxy2UDPAddr, err := net.ResolveUDPAddr("udp", proxy2Addr)
 	if err != nil {
 		fmt.Printf("resolve Proxy 2 UDP address failed: %v\n", err)
 		return
 	}
-	conn2, err := net.DialUDP("udp", nil, proxy2UDPAddr)
-	if err != nil {
-		fmt.Printf("create UDP connection to Proxy 2 failed: %v\n", err)
-		return
-	}
-	defer conn2.Close()
 
-	// start NACK listener for conn1 and conn2
-	go nackListener(conn1, "Proxy1", quietMode)
-	go nackListener(conn2, "Proxy2", quietMode)
+	// start NACK listener
+	go nackListener(conn, quietMode)
 
 	// start retransmit handler
 	go retransmitHandler(quietMode)
 
 	if !quietMode {
-		fmt.Printf("UDP Server started, sending to Proxy 1: %s and Proxy 2: %s\n", proxy1Addr, proxy2Addr)
+		fmt.Printf("UDP Server started on %s, sending to Proxy 1: %s and Proxy 2: %s\n",
+			conn.LocalAddr().String(), proxy1Addr, proxy2Addr)
 	}
 
 	// send 10000 packets
@@ -97,7 +99,7 @@ func main() {
 		cacheMutex.Unlock()
 
 		// send to Proxy 1
-		_, err := conn1.Write([]byte(message))
+		_, err := conn.WriteToUDP([]byte(message), proxy1UDPAddr)
 		if err != nil {
 			if !quietMode {
 				fmt.Printf("send Packet %d to Proxy 1 failed: %v\n", i, err)
@@ -107,7 +109,7 @@ func main() {
 		}
 
 		// send to Proxy 2
-		_, err = conn2.Write([]byte(message))
+		_, err = conn.WriteToUDP([]byte(message), proxy2UDPAddr)
 		if err != nil {
 			if !quietMode {
 				fmt.Printf("send Packet %d to Proxy 2 failed: %v\n", i, err)
@@ -156,7 +158,7 @@ func main() {
 	}
 }
 
-func nackListener(conn *net.UDPConn, proxyName string, quietMode bool) {
+func nackListener(conn *net.UDPConn, quietMode bool) {
 	buffer := make([]byte, 1024)
 	for {
 		conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
@@ -179,7 +181,7 @@ func nackListener(conn *net.UDPConn, proxyName string, quietMode bool) {
 			if !clientsCompleted[clientKey] {
 				clientsCompleted[clientKey] = true
 				if !quietMode {
-					fmt.Printf("[%s] received FIN from client %s\n", proxyName, addr)
+					fmt.Printf("received FIN from %s\n", addr)
 				}
 			}
 			clientsMutex.Unlock()
@@ -192,13 +194,13 @@ func nackListener(conn *net.UDPConn, proxyName string, quietMode bool) {
 			_, err := fmt.Sscanf(message, "NACK:%d", &seqNum)
 			if err != nil {
 				if !quietMode {
-					fmt.Printf("[%s] parse NACK failed: %v\n", proxyName, err)
+					fmt.Printf("parse NACK failed: %v\n", err)
 				}
 				continue
 			}
 
 			if !quietMode {
-				fmt.Printf("[%s] received NACK for packet %d from %s\n", proxyName, seqNum, addr)
+				fmt.Printf("received NACK for packet %d from %s\n", seqNum, addr)
 			}
 
 			retransmitChan <- RetransmitRequest{
