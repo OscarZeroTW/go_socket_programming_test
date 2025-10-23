@@ -18,6 +18,8 @@ type ReorderBuffer struct {
 	processedCount int
 	lostPackets    map[int]bool
 	nackSent       map[int]bool
+	totalPackets   int
+	completed      bool
 }
 
 type PacketData struct {
@@ -33,6 +35,8 @@ func NewReorderBuffer() *ReorderBuffer {
 		expectedSeqNum: 1,
 		lostPackets:    make(map[int]bool),
 		nackSent:       make(map[int]bool),
+		totalPackets:   10000,
+		completed:      false,
 	}
 }
 
@@ -59,6 +63,9 @@ func (rb *ReorderBuffer) processPacket(seqNum int, message string, timestamp tim
 				break
 			}
 		}
+
+		// check if all packets received
+		rb.checkCompletion(conn, senderAddr)
 	} else if seqNum > rb.expectedSeqNum {
 		// received out-of-order packet, buffer it
 		rb.buffer[seqNum] = PacketData{
@@ -103,9 +110,24 @@ func (rb *ReorderBuffer) sendNACK(seqNum int, conn *net.UDPConn, senderAddr *net
 	}
 }
 
+func (rb *ReorderBuffer) checkCompletion(conn *net.UDPConn, senderAddr *net.UDPAddr) {
+	if !rb.completed && rb.processedCount >= rb.totalPackets {
+		rb.completed = true
+		fmt.Printf("\n[Client 2] === ALL PACKETS RECEIVED ===\n")
+		rb.printStats()
+
+		// send FIN to server
+		finMsg := "FIN"
+		_, err := conn.WriteToUDP([]byte(finMsg), senderAddr)
+		if err != nil {
+			fmt.Printf("[Client 2] send FIN failed: %v\n", err)
+		} else {
+			fmt.Printf("[Client 2] sent FIN to server\n")
+		}
+	}
+}
+
 func (rb *ReorderBuffer) printStats() {
-	rb.mu.Lock()
-	defer rb.mu.Unlock()
 	fmt.Printf("\n[Client 2] === Statistics ===\n")
 	fmt.Printf("  Total Received: %d\n", rb.receivedCount)
 	fmt.Printf("  Total Processed: %d\n", rb.processedCount)
@@ -150,7 +172,9 @@ func main() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
+			reorderBuf.mu.Lock()
 			reorderBuf.printStats()
+			reorderBuf.mu.Unlock()
 		}
 	}()
 

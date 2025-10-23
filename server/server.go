@@ -18,9 +18,11 @@ type PacketBuffer struct {
 }
 
 var (
-	packetCache    = make(map[int]PacketBuffer) // cache for retransmission
-	cacheMutex     sync.RWMutex
-	retransmitChan = make(chan RetransmitRequest, 100)
+	packetCache      = make(map[int]PacketBuffer) // cache for retransmission
+	cacheMutex       sync.RWMutex
+	retransmitChan   = make(chan RetransmitRequest, 100)
+	clientsCompleted = make(map[string]bool) // track which clients have finished
+	clientsMutex     sync.Mutex
 )
 
 type RetransmitRequest struct {
@@ -122,26 +124,68 @@ func main() {
 		fmt.Println("all packets sent, waiting for retransmit requests...")
 	}
 
-	// keep server running to handle retransmissions
-	time.Sleep(30 * time.Second)
+	// wait for both clients to finish or timeout after 60 seconds
+	timeout := time.After(60 * time.Second)
+	checkTicker := time.NewTicker(2 * time.Second)
+	defer checkTicker.Stop()
 
-	if !quietMode {
-		fmt.Println("server shutting down")
+	for {
+		select {
+		case <-timeout:
+			if !quietMode {
+				fmt.Println("timeout reached, shutting down server")
+			}
+			return
+		case <-checkTicker.C:
+			clientsMutex.Lock()
+			completedCount := len(clientsCompleted)
+			clientsMutex.Unlock()
+
+			if !quietMode {
+				fmt.Printf("clients completed: %d/2\n", completedCount)
+			}
+
+			if completedCount >= 2 {
+				if !quietMode {
+					fmt.Println("all clients completed, shutting down server")
+				}
+				time.Sleep(1 * time.Second) // give time for final messages
+				return
+			}
+		}
 	}
 }
 
 func nackListener(conn *net.UDPConn, proxyName string, quietMode bool) {
 	buffer := make([]byte, 1024)
 	for {
+		conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 		n, addr, err := conn.ReadFromUDP(buffer)
 		if err != nil {
-			if !quietMode {
-				fmt.Printf("[%s] read NACK failed: %v\n", proxyName, err)
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// timeout is expected, continue
+				continue
 			}
-			continue
+			// connection closed or other error, exit gracefully
+			return
 		}
 
 		message := string(buffer[:n])
+
+		// Check for FIN message: "FIN"
+		if strings.TrimSpace(message) == "FIN" {
+			clientsMutex.Lock()
+			clientKey := addr.String()
+			if !clientsCompleted[clientKey] {
+				clientsCompleted[clientKey] = true
+				if !quietMode {
+					fmt.Printf("[%s] received FIN from client %s\n", proxyName, addr)
+				}
+			}
+			clientsMutex.Unlock()
+			continue
+		}
+
 		// NACK format: "NACK:123"
 		if strings.HasPrefix(message, "NACK:") {
 			var seqNum int
