@@ -11,15 +11,16 @@ import (
 )
 
 type ReorderBuffer struct {
-	mu             sync.Mutex
-	buffer         map[int]PacketData
-	expectedSeqNum int
-	receivedCount  int
-	processedCount int
-	lostPackets    map[int]bool
-	nackSent       map[int]bool
-	totalPackets   int
-	completed      bool
+	mu               sync.Mutex
+	buffer           map[int]PacketData
+	expectedSeqNum   int
+	receivedCount    int
+	processedCount   int
+	lostPackets      map[int]bool
+	nackSent         map[int]bool
+	nackLastSentTime map[int]time.Time
+	totalPackets     int
+	completed        bool
 }
 
 type PacketData struct {
@@ -31,12 +32,13 @@ type PacketData struct {
 
 func NewReorderBuffer() *ReorderBuffer {
 	return &ReorderBuffer{
-		buffer:         make(map[int]PacketData),
-		expectedSeqNum: 1,
-		lostPackets:    make(map[int]bool),
-		nackSent:       make(map[int]bool),
-		totalPackets:   10000,
-		completed:      false,
+		buffer:           make(map[int]PacketData),
+		expectedSeqNum:   1,
+		lostPackets:      make(map[int]bool),
+		nackSent:         make(map[int]bool),
+		nackLastSentTime: make(map[int]time.Time),
+		totalPackets:     10000,
+		completed:        false,
 	}
 }
 
@@ -108,6 +110,7 @@ func (rb *ReorderBuffer) sendNACK(seqNum int, conn *net.UDPConn, senderAddr *net
 	if err != nil {
 		fmt.Printf("[Client 2] send NACK for SEQ %d failed: %v\n", seqNum, err)
 	} else {
+		rb.nackLastSentTime[seqNum] = time.Now()
 		fmt.Printf("[Client 2] sent NACK for missing SEQ %d\n", seqNum)
 	}
 }
@@ -125,6 +128,36 @@ func (rb *ReorderBuffer) checkCompletion(conn *net.UDPConn, senderAddr *net.UDPA
 			fmt.Printf("[Client 2] send FIN failed: %v\n", err)
 		} else {
 			fmt.Printf("[Client 2] sent FIN to server\n")
+		}
+	}
+}
+
+func (rb *ReorderBuffer) retryNACKs(conn *net.UDPConn, senderAddr *net.UDPAddr) {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+
+	if rb.completed {
+		return
+	}
+
+	now := time.Now()
+	retryInterval := 500 * time.Millisecond
+
+	// Retry NACK for missing packets between expectedSeqNum and first buffered packet
+	for i := rb.expectedSeqNum; i < rb.expectedSeqNum+100; i++ {
+		_, inBuffer := rb.buffer[i]
+		if !inBuffer && rb.nackSent[i] {
+			lastSent, exists := rb.nackLastSentTime[i]
+			if !exists || now.Sub(lastSent) > retryInterval {
+				// Retry NACK
+				nackMsg := fmt.Sprintf("NACK:%d", i)
+				conn.WriteToUDP([]byte(nackMsg), senderAddr)
+				rb.nackLastSentTime[i] = now
+			}
+		}
+		// Stop if we find a buffered packet (packets beyond might not be lost yet)
+		if i > rb.expectedSeqNum+10 && len(rb.buffer) > 0 {
+			break
 		}
 	}
 }
@@ -168,6 +201,7 @@ func main() {
 
 	reorderBuf := NewReorderBuffer()
 	buffer := make([]byte, 1024)
+	var lastSenderAddr *net.UDPAddr
 
 	// periodically print stats
 	go func() {
@@ -180,7 +214,16 @@ func main() {
 		}
 	}()
 
-	var lastSenderAddr *net.UDPAddr
+	// periodically retry NACKs for missing packets
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for range ticker.C {
+			if lastSenderAddr != nil {
+				reorderBuf.retryNACKs(conn, lastSenderAddr)
+			}
+		}
+	}()
 
 	for {
 		n, senderAddr, err := conn.ReadFromUDP(buffer)
