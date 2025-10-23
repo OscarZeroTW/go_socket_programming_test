@@ -76,9 +76,11 @@ func (rb *ReorderBuffer) processPacket(seqNum int, message string, timestamp tim
 		}
 		fmt.Printf("[Client 1] Out-of-order: received SEQ %d, expected %d (buffered)\n", seqNum, rb.expectedSeqNum)
 
-		// send NACK for missing packets
+		// send NACK for missing packets (only if not already buffered and not already sent NACK)
 		for i := rb.expectedSeqNum; i < seqNum; i++ {
-			if !rb.nackSent[i] {
+			// Check if packet is not in buffer and NACK not sent yet
+			_, alreadyBuffered := rb.buffer[i]
+			if !alreadyBuffered && !rb.nackSent[i] {
 				rb.sendNACK(i, conn, senderAddr)
 				rb.nackSent[i] = true
 				rb.lostPackets[i] = true
