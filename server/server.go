@@ -118,8 +118,8 @@ func main() {
 			fmt.Printf("sent: Packet %d to Proxy 2\n", i)
 		}
 
-		// wait 1ms (adjust for 10000 packets)
-		time.Sleep(1 * time.Millisecond)
+		// wait 10ms (adjust for 10000 packets)
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	if !quietMode {
